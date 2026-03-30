@@ -6,5 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class Role extends Model
 {
-    //
+    public $fillable = ['nama_role', 'kode_role', 'deskripsi'];
+
+    public function UserRole()
+    {
+        return $this->hasMany(UserRole::class);
+    }
 }
