@@ -11,10 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('pemilik_kendaraans', function (Blueprint $table) {
+        Schema::create('kapasitas_parkirs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->nullable()->unique()->constrained('users')->nullOnDelete();
-            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks')->restrictOnDelete();
+            $table->foreignId('lahan_parkir_id')->constrained('lahan_parkirs')->cascadeOnDelete();
+            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks')->cascadeOnDelete();
+            $table->foreignId('jenis_kendaraan_id')->constrained('jenis_kendaraans')->cascadeOnDelete();
             $table->boolean('status_aktif')->default(true);
             $table->timestamps();
         });
@@ -25,6 +26,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('pemilik_kendaraans');
+        Schema::dropIfExists('kapasitas_parkirs');
     }
 };

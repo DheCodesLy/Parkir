@@ -11,15 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('kendaraans', function (Blueprint $table) {
+        Schema::create('tarif_parkirs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('pemilik_id')->constrained('pemilik_kendaraans')->cascadeOnDelete();
-            $table->string('no_polisi')->nullable()->unique();
             $table->foreignId('jenis_kendaraan_id')->constrained('jenis_kendaraans')->cascadeOnDelete();
-            $table->string('merk')->nullable();
-            $table->string('warna')->nullable();
-            $table->text('catatan')->nullable();
+            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks')->cascadeOnDelete();
+            $table->decimal('biaya_masuk')->default(0);
+            $table->decimal('biaya_per_jam');
+            $table->decimal('biaya_maksimal')->nullable();
+            $table->integer('gratis_menit')->default(0);
             $table->boolean('status_aktif')->default(true);
+            $table->dateTime('masa_berlaku');
+            $table->datetime('selesai_berlaku');
             $table->timestamps();
         });
     }
@@ -29,6 +31,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('kendaraans');
+        Schema::dropIfExists('tarif_parkirs');
     }
 };
