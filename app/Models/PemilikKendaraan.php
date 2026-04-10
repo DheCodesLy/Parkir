@@ -17,10 +17,9 @@ class PemilikKendaraan extends Model
     {
         return $this->belongsTo(JenisPemilik::class, 'jenis_pemilik_id');
     }
-    
+
     public function Kendaraan()
     {
         return $this->hasOne(Kendaraan::class);
     }
-
 }

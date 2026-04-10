@@ -1,3 +1,5 @@
+
+
 <?php
 
 use Illuminate\Database\Migrations\Migration;
@@ -11,22 +13,22 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('transaksi_parkirs', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('kendaraan_id')->constrained('kendaraans');
-            $table->string('kode_tiket')->unique();
-            $table->dateTime('waktu_masuk');
-            $table->dateTime('waktu_keluar');
-            $table->enum('status_parkir',['parkir', 'keluar', 'batal']);
-            $table->enum('status_tiket', ['aktif', 'nonaktif', 'invalid', 'hilang'])->default('aktif');
-            $table->enum('kondisi_kendaraan', ['baik', 'rusak', 'hilang']);
-            $table->string('alasan_denda');
-            $table->decimal('denda_manual')->default(0);
-            $table->text('keterangan')->nullable();
-            $table->foreignId('dibuat_oleh')->constrained('users')->restrictOnDelete();
-            $table->foreignId('diperbarui_oleh')->nullable()->constrained('users')->restrictOnDelete();
-            $table->timestamps();
-        });
+            Schema::create('transaksi_parkirs', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('kendaraan_id')->constrained('kendaraans');
+                $table->string('kode_tiket')->unique();
+                $table->dateTime('waktu_masuk');
+                $table->dateTime('waktu_keluar')->nullable();
+                $table->enum('status_parkir',['parkir', 'keluar', 'batal'])->default('parkir');
+                $table->enum('status_tiket', ['aktif', 'nonaktif', 'invalid', 'hilang'])->default('aktif');
+                $table->enum('kondisi_kendaraan', ['baik', 'rusak', 'hilang'])->default('baik');
+                $table->text('alasan_denda')->nullable();
+                $table->decimal('denda_manual')->default(0);
+                $table->text('keterangan')->nullable();
+                $table->foreignId('dibuat_oleh')->constrained('users')->restrictOnDelete();
+                $table->foreignId('diperbarui_oleh')->nullable()->constrained('users')->restrictOnDelete();
+                $table->timestamps();
+            });
     }
 
     /**

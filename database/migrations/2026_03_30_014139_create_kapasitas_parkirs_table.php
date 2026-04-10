@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('kapasitas_parkirs', function (Blueprint $table) {
             $table->id();
             $table->foreignId('lahan_parkir_id')->constrained('lahan_parkirs')->cascadeOnDelete();
-            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks')->cascadeOnDelete();
-            $table->foreignId('jenis_kendaraan_id')->constrained('jenis_kendaraans')->cascadeOnDelete();
+            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks');
+            $table->foreignId('jenis_kendaraan_id')->constrained('jenis_kendaraans');
             $table->boolean('status_aktif')->default(true);
             $table->timestamps();
         });
