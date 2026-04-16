@@ -20,6 +20,6 @@ class PemilikKendaraan extends Model
 
     public function Kendaraan()
     {
-        return $this->hasOne(Kendaraan::class);
+        return $this->hasOne(Kendaraan::class, 'pemilik_id', 'id');
     }
 }

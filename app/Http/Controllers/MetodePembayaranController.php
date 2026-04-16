@@ -4,87 +4,169 @@ namespace App\Http\Controllers;
 
 use App\Models\MetodePembayaran;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class MetodePembayaranController extends Controller
 {
-    public function index()
+   public function index(Request $request)
     {
-        $metodePembayarans = MetodePembayaran::latest()->get();
-        return view('MetodePembayaran.index', compact('metodePembayarans'));
+        $query = MetodePembayaran::query()->orderBy('urutan')->orderBy('id');
+
+        if ($request->filled('keyword')) {
+            $keyword = $request->keyword;
+
+            $query->where(function ($q) use ($keyword) {
+                $q->where('nama_metode', 'like', '%' . $keyword . '%')
+                    ->orWhere('kode_metode', 'like', '%' . $keyword . '%')
+                    ->orWhere('kategori', 'like', '%' . $keyword . '%');
+            });
+        }
+
+        if ($request->filled('status_aktif')) {
+            $query->where('status_aktif', $request->status_aktif);
+        }
+
+        $items = $query->paginate(10)->withQueryString();
+
+        return view('metode_pembayaran.index', compact('items'));
+    }
+
+    public function create()
+    {
+        return view('metode_pembayaran.create');
     }
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        $data = $request->validate([
             'nama_metode' => ['required', 'string', 'max:100', 'unique:metode_pembayarans,nama_metode'],
+            'kode_metode' => ['required', 'string', 'max:50', 'unique:metode_pembayarans,kode_metode'],
             'kategori' => ['required', Rule::in(['tunai', 'digital', 'transfer', 'lainnya'])],
-            'status_aktif' => ['required', 'boolean'],
-            'urutan' => ['required', 'integer', 'min:0'],
+            'status_aktif' => ['nullable', 'boolean'],
+            'urutan' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $validated['nama_metode'] = Str::title(trim($validated['nama_metode']));
-        $validated['kode_metode'] = $this->generateKodeMetode($validated['nama_metode']);
+        DB::transaction(function () use ($data) {
+            $lastPosition = (int) MetodePembayaran::max('urutan');
+            $position = isset($data['urutan']) ? (int) $data['urutan'] : $lastPosition + 1;
+            $position = max(1, min($position, $lastPosition + 1));
 
-        MetodePembayaran::create($validated);
+            MetodePembayaran::where('urutan', '>=', $position)->increment('urutan');
+
+            MetodePembayaran::create([
+                'nama_metode' => $data['nama_metode'],
+                'kode_metode' => $data['kode_metode'],
+                'kategori' => $data['kategori'],
+                'status_aktif' => $data['status_aktif'] ?? true,
+                'urutan' => $position,
+            ]);
+        });
 
         return redirect()
             ->route('metode-pembayaran.index')
-            ->with('success', 'Data berhasil ditambahkan.');
+            ->with('success', 'Metode pembayaran berhasil ditambahkan');
+    }
+
+    public function show(MetodePembayaran $metodePembayaran)
+    {
+        return view('metode_pembayaran.show', compact('metodePembayaran'));
+    }
+
+    public function edit(MetodePembayaran $metodePembayaran)
+    {
+        return view('metode_pembayaran.edit', compact('metodePembayaran'));
     }
 
     public function update(Request $request, MetodePembayaran $metodePembayaran)
     {
-        $validated = $request->validate([
-            'nama_metode' => [
-                'required',
-                'string',
-                'max:100',
-                Rule::unique('metode_pembayarans', 'nama_metode')->ignore($metodePembayaran->id),
-            ],
+        $data = $request->validate([
+            'nama_metode' => ['required', 'string', 'max:100', Rule::unique('metode_pembayarans', 'nama_metode')->ignore($metodePembayaran->id)],
+            'kode_metode' => ['required', 'string', 'max:50', Rule::unique('metode_pembayarans', 'kode_metode')->ignore($metodePembayaran->id)],
             'kategori' => ['required', Rule::in(['tunai', 'digital', 'transfer', 'lainnya'])],
-            'status_aktif' => ['required', 'boolean'],
-            'urutan' => ['required', 'integer', 'min:0'],
+            'status_aktif' => ['nullable', 'boolean'],
+            'urutan' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $validated['nama_metode'] = Str::title(trim($validated['nama_metode']));
-        $validated['kode_metode'] = $this->generateKodeMetode($validated['nama_metode'], $metodePembayaran->id);
+        DB::transaction(function () use ($data, $metodePembayaran) {
+            $oldPosition = (int) $metodePembayaran->urutan;
+            $maxPosition = (int) MetodePembayaran::where('id', '!=', $metodePembayaran->id)->max('urutan');
+            $newPosition = isset($data['urutan']) ? (int) $data['urutan'] : $oldPosition;
+            $newPosition = max(1, min($newPosition, max(1, $maxPosition + 1)));
 
-        $metodePembayaran->update($validated);
+            if ($newPosition < $oldPosition) {
+                MetodePembayaran::where('id', '!=', $metodePembayaran->id)
+                    ->whereBetween('urutan', [$newPosition, $oldPosition - 1])
+                    ->increment('urutan');
+            }
+
+            if ($newPosition > $oldPosition) {
+                MetodePembayaran::where('id', '!=', $metodePembayaran->id)
+                    ->whereBetween('urutan', [$oldPosition + 1, $newPosition])
+                    ->decrement('urutan');
+            }
+
+            $metodePembayaran->update([
+                'nama_metode' => $data['nama_metode'],
+                'kode_metode' => $data['kode_metode'],
+                'kategori' => $data['kategori'],
+                'status_aktif' => $data['status_aktif'] ?? false,
+                'urutan' => $newPosition,
+            ]);
+        });
 
         return redirect()
             ->route('metode-pembayaran.index')
-            ->with('success', 'Data berhasil diupdate.');
+            ->with('success', 'Metode pembayaran berhasil diperbarui');
     }
 
-    public function destroy(Request $request, MetodePembayaran $metodePembayaran)
+    public function destroy(MetodePembayaran $metodePembayaran)
     {
-        $metodePembayaran->delete();
+        DB::transaction(function () use ($metodePembayaran) {
+            $deletedPosition = (int) $metodePembayaran->urutan;
+
+            $metodePembayaran->delete();
+
+            MetodePembayaran::where('urutan', '>', $deletedPosition)->decrement('urutan');
+        });
 
         return redirect()
             ->route('metode-pembayaran.index')
-            ->with('success', 'Data berhasil dihapus.');
+            ->with('success', 'Metode pembayaran berhasil dihapus');
     }
 
-    private function generateKodeMetode(string $namaMetode, ?int $ignoreId = null): string
+    public function reorder(Request $request)
     {
-        $baseKode = Str::slug(trim($namaMetode), '-');
-        $kode = $baseKode;
-        $counter = 1;
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer', 'distinct', 'exists:metode_pembayarans,id'],
+        ]);
 
-        while (
-            MetodePembayaran::withTrashed()
-                ->when($ignoreId, function ($query) use ($ignoreId) {
-                    $query->where('id', '!=', $ignoreId);
-                })
-                ->where('kode_metode', $kode)
-                ->exists()
-        ) {
-            $kode = $baseKode . '-' . $counter;
-            $counter++;
-        }
+        DB::transaction(function () use ($data) {
+            $requestedIds = collect($data['ids'])->map(fn ($id) => (int) $id)->values();
+            $existingIds = MetodePembayaran::query()->orderBy('urutan')->orderBy('id')->pluck('id');
+            $finalIds = $requestedIds->merge($existingIds->diff($requestedIds))->values();
 
-        return $kode;
+            foreach ($finalIds as $index => $id) {
+                MetodePembayaran::whereKey($id)->update([
+                    'urutan' => $index + 1,
+                ]);
+            }
+        });
+
+        return redirect()
+            ->route('metode-pembayaran.index')
+            ->with('success', 'Urutan metode pembayaran berhasil diperbarui');
+    }
+
+    public function toggleStatus(MetodePembayaran $metodePembayaran)
+    {
+        $metodePembayaran->update([
+            'status_aktif' => !$metodePembayaran->status_aktif,
+        ]);
+
+        return redirect()
+            ->route('metode-pembayaran.index')
+            ->with('success', 'Status metode pembayaran berhasil diperbarui');
     }
 }

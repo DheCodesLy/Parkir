@@ -2,14 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\JenisKendaraan;
 use App\Models\JenisPemilik;
+use App\Models\KapasitasParkir;
 use App\Models\Kendaraan;
+use App\Models\LahanParkir;
 use App\Models\PemilikKendaraan;
 use App\Models\TransaksiParkir;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ParkirController extends Controller
 {
@@ -60,8 +65,6 @@ class ParkirController extends Controller
                 ];
             });
 
-        // PENTING: Ganti return response()->json(...) menjadi return view(...)
-        // Asumsinya file blade kamu ada di folder resources/views/parkir/index.blade.php
         return view('parkir.index', compact('transaksis'));
     }
 
@@ -105,93 +108,297 @@ class ParkirController extends Controller
         ]);
     }
 
+    public function formMasuk(Request $request)
+    {
+        $daftarLahan = LahanParkir::query()
+            ->where('status_aktif', true)
+            ->orderBy('nama_lahan')
+            ->get(['id', 'nama_lahan', 'kapasitas', 'sisa_slot']);
+
+        $lahanTerpilihId = (int) $request->session()->get('parkir_masuk.lahan_parkir_id');
+
+        $jenisKendaraan = collect();
+        $selectedJenisKendaraanId = old('jenis_kendaraan_id');
+
+        if ($lahanTerpilihId) {
+            $jenisKendaraan = $this->getJenisKendaraanLahan($lahanTerpilihId);
+
+            if ($jenisKendaraan->count() === 1 && !$selectedJenisKendaraanId) {
+                $selectedJenisKendaraanId = $jenisKendaraan->first()->id;
+            }
+        }
+
+        return view('parkir.parkir-masuk', [
+            'daftarLahan' => $daftarLahan,
+            'lahanTerpilihId' => $lahanTerpilihId,
+            'jenisKendaraan' => $jenisKendaraan,
+            'selectedJenisKendaraanId' => $selectedJenisKendaraanId,
+        ]);
+    }
+
+    public function pilihLahan(Request $request)
+    {
+        $validated = $request->validate([
+            'lahan_parkir_id' => [
+                'required',
+                'integer',
+                Rule::exists('lahan_parkirs', 'id')->where(
+                    fn ($query) => $query->where('status_aktif', true)
+                ),
+            ],
+        ]);
+
+        $lahan = LahanParkir::query()
+            ->select('id', 'nama_lahan', 'kapasitas', 'sisa_slot')
+            ->findOrFail($validated['lahan_parkir_id']);
+
+        $jenisKendaraan = $this->getJenisKendaraanLahan($lahan->id)->values();
+
+        if ($jenisKendaraan->isEmpty()) {
+            throw ValidationException::withMessages([
+                'lahan_parkir_id' => 'Lahan ini belum punya jenis kendaraan aktif.',
+            ]);
+        }
+
+        $request->session()->put('parkir_masuk.lahan_parkir_id', $lahan->id);
+        $request->session()->put('parkir_masuk.nama_lahan', $lahan->nama_lahan);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'lahan' => $lahan,
+                'jenis_kendaraans' => $jenisKendaraan,
+                'auto_selected' => $jenisKendaraan->count() === 1,
+                'selected_id' => $jenisKendaraan->count() === 1
+                    ? $jenisKendaraan->first()->id
+                    : null,
+            ],
+        ]);
+    }
+
     public function masuk(Request $request)
     {
         $validated = $request->validate([
-            'no_polisi' => ['required', 'string', 'max:255'],
-            'jenis_kendaraan_id' => ['required', 'exists:jenis_kendaraans,id'],
-        ]);
-
-        $transaksi = DB::transaction(function () use ($validated) {
-            $noPolisi = $this->normalizeNoPolisi($validated['no_polisi']);
-
-            $kendaraan = Kendaraan::with(['pemilik', 'jenisKendaraan'])
-                ->whereRaw('UPPER(REPLACE(no_polisi, " ", "")) = ?', [$noPolisi])
-                ->first();
-
-            if (!$kendaraan) {
-                $jenisPemilikTamu = JenisPemilik::query()
-                    ->where(function ($query) {
-                        $query->where('kode_jenis_pemilik', 'tamu')
-                            ->orWhereRaw('LOWER(nama_jenis_pemilik) = ?', ['tamu']);
-                    })
-                    ->firstOrFail();
-
-                $pemilik = PemilikKendaraan::create([
-                    'user_id' => null,
-                    'jenis_pemilik_id' => $jenisPemilikTamu->id,
-                    'status_aktif' => 1,
-                ]);
-
-                $kendaraan = Kendaraan::create([
-                    'pemilik_id' => $pemilik->id,
-                    'no_polisi' => $noPolisi,
-                    'jenis_kendaraan_id' => $validated['jenis_kendaraan_id'],
-                    'merk' => null,
-                    'warna' => null,
-                    'catatan' => null,
-                    'status_aktif' => 1,
-                ]);
-            }
-
-            $transaksiAktif = TransaksiParkir::query()
-                ->where('kendaraan_id', $kendaraan->id)
-                ->where('status_parkir', 'parkir')
-                ->whereIn('status_tiket', ['aktif', 'invalid'])
-                ->first();
-
-            if ($transaksiAktif) {
-                abort(response()->json([
-                    'message' => 'Kendaraan ini masih memiliki transaksi parkir aktif',
-                ], 422));
-            }
-
-            return TransaksiParkir::create([
-                'kendaraan_id' => $kendaraan->id,
-                'kode_tiket' => $this->generateKodeTiket(),
-                'waktu_masuk' => now(),
-                'waktu_keluar' => null,
-                'status_parkir' => 'parkir',
-                'status_tiket' => 'aktif',
-                'kondisi_kendaraan' => 'baik',
-                'alasan_denda' => null,
-                'denda_manual' => 0,
-                'keterangan' => null,
-                'dibuat_oleh' => Auth::id(),
-                'diperbarui_oleh' => null,
-            ]);
-        });
-
-        $transaksi->load([
-            'kendaraan',
-            'kendaraan.jenisKendaraan',
-            'kendaraan.pemilik',
-            'kendaraan.pemilik.jenisPemilik',
-        ]);
-
-        return response()->json([
-            'message' => 'Kendaraan berhasil masuk parkir',
-            'data' => [
-                'id' => $transaksi->id,
-                'nomor_plat' => $transaksi->kendaraan?->no_polisi,
-                'jenis_kendaraan' => $transaksi->kendaraan?->jenisKendaraan?->nama_jenis_kendaraan,
-                'jenis_pemilik' => $transaksi->kendaraan?->pemilik?->jenisPemilik?->nama_jenis_pemilik,
-                'kode_tiket' => $transaksi->kode_tiket,
-                'status_parkir' => $transaksi->status_parkir,
-                'status_tiket' => $transaksi->status_tiket,
-                'waktu_masuk' => $transaksi->waktu_masuk,
+            'lahan_parkir_id' => [
+                'required',
+                'integer',
+                Rule::exists('lahan_parkirs', 'id')->where(
+                    fn ($query) => $query->where('status_aktif', true)
+                ),
             ],
-        ], 201);
+            'no_polisi' => [
+                'required',
+                'string',
+                'max:20',
+                'regex:/^[A-Z]{1,2}\s\d{1,4}\s[A-Z]{1,3}$/',
+            ],
+            'jenis_kendaraan_id' => ['nullable', 'integer', 'exists:jenis_kendaraans,id'],
+        ], [
+            'jenis_kendaraan_id.exists' => 'Jenis kendaraan tidak valid.',
+            'no_polisi.regex' => 'Format plat harus seperti AB 5678 RT.',
+        ]);
+
+        try {
+            $hasil = DB::transaction(function () use ($validated, $request) {
+                $noPolisi = $this->normalizeNoPolisi($validated['no_polisi']);
+                $waktuMasuk = now();
+
+                $lahan = LahanParkir::query()
+                    ->lockForUpdate()
+                    ->findOrFail($validated['lahan_parkir_id']);
+
+                if (!$lahan->status_aktif) {
+                    throw ValidationException::withMessages([
+                        'lahan_parkir_id' => 'Lahan parkir tidak aktif.',
+                    ]);
+                }
+
+                if ((int) $lahan->sisa_slot < 1) {
+                    throw ValidationException::withMessages([
+                        'lahan_parkir_id' => 'Lahan parkir sudah penuh.',
+                    ]);
+                }
+
+                $jenisKendaraanTersedia = KapasitasParkir::query()
+                    ->where('lahan_parkir_id', $lahan->id)
+                    ->where('status_aktif', true)
+                    ->distinct()
+                    ->pluck('jenis_kendaraan_id')
+                    ->map(fn ($id) => (int) $id)
+                    ->values();
+
+                if ($jenisKendaraanTersedia->isEmpty()) {
+                    throw ValidationException::withMessages([
+                        'lahan_parkir_id' => 'Lahan ini belum memiliki jenis kendaraan aktif.',
+                    ]);
+                }
+
+                $jenisKendaraanId = isset($validated['jenis_kendaraan_id'])
+                    ? (int) $validated['jenis_kendaraan_id']
+                    : null;
+
+                if (!$jenisKendaraanId && $jenisKendaraanTersedia->count() === 1) {
+                    $jenisKendaraanId = (int) $jenisKendaraanTersedia->first();
+                }
+
+                if (!$jenisKendaraanId || !$jenisKendaraanTersedia->contains($jenisKendaraanId)) {
+                    throw ValidationException::withMessages([
+                        'jenis_kendaraan_id' => 'Jenis kendaraan tidak tersedia pada lahan yang dipilih.',
+                    ]);
+                }
+
+                $kendaraan = Kendaraan::query()
+                    ->with('pemilik')
+                    ->lockForUpdate()
+                    ->whereRaw("UPPER(REPLACE(no_polisi, ' ', '')) = ?", [$noPolisi])
+                    ->first();
+
+                if ($kendaraan && (int) $kendaraan->jenis_kendaraan_id !== $jenisKendaraanId) {
+                    throw ValidationException::withMessages([
+                        'jenis_kendaraan_id' => 'Jenis kendaraan tidak sesuai dengan data kendaraan terdaftar.',
+                    ]);
+                }
+
+                if (!$kendaraan) {
+                    $jenisPemilikTamu = JenisPemilik::query()
+                        ->where(function ($query) {
+                            $query->where('kode_jenis_pemilik', 'tamu')
+                                ->orWhereRaw('LOWER(nama_jenis_pemilik) = ?', ['tamu']);
+                        })
+                        ->first();
+
+                    if (!$jenisPemilikTamu) {
+                        throw ValidationException::withMessages([
+                            'no_polisi' => 'Jenis pemilik tamu tidak ditemukan.',
+                        ]);
+                    }
+
+                    $pemilik = PemilikKendaraan::create([
+                        'user_id' => null,
+                        'jenis_pemilik_id' => $jenisPemilikTamu->id,
+                        'status_aktif' => 1,
+                    ]);
+
+                    $kendaraan = Kendaraan::create([
+                        'pemilik_id' => $pemilik->id,
+                        'no_polisi' => $noPolisi,
+                        'jenis_kendaraan_id' => $jenisKendaraanId,
+                        'merk' => null,
+                        'warna' => null,
+                        'catatan' => null,
+                        'status_aktif' => 1,
+                    ]);
+
+                    $jenisPemilikId = $jenisPemilikTamu->id;
+                } else {
+                    $jenisPemilikId = $kendaraan->pemilik?->jenis_pemilik_id;
+                }
+
+                if (!$jenisPemilikId) {
+                    throw ValidationException::withMessages([
+                        'no_polisi' => 'Jenis pemilik kendaraan tidak ditemukan.',
+                    ]);
+                }
+
+                $kapasitasValid = KapasitasParkir::query()
+                    ->where('lahan_parkir_id', $lahan->id)
+                    ->where('jenis_pemilik_id', $jenisPemilikId)
+                    ->where('jenis_kendaraan_id', $jenisKendaraanId)
+                    ->where('status_aktif', true)
+                    ->exists();
+
+                if (!$kapasitasValid) {
+                    throw ValidationException::withMessages([
+                        'jenis_kendaraan_id' => 'Kombinasi lahan, pemilik, dan kendaraan tidak diizinkan.',
+                    ]);
+                }
+
+                $transaksiAktif = TransaksiParkir::query()
+                    ->where('kendaraan_id', $kendaraan->id)
+                    ->where('status_parkir', 'parkir')
+                    ->whereIn('status_tiket', ['aktif', 'invalid'])
+                    ->lockForUpdate()
+                    ->exists();
+
+                if ($transaksiAktif) {
+                    throw ValidationException::withMessages([
+                        'no_polisi' => 'Kendaraan ini masih memiliki transaksi parkir aktif.',
+                    ]);
+                }
+
+                $transaksi = TransaksiParkir::create([
+                    'kendaraan_id' => $kendaraan->id,
+                    'lahan_parkir_id' => $lahan->id,
+                    'kode_tiket' => $this->generateKodeTiket(),
+                    'waktu_masuk' => $waktuMasuk,
+                    'dibuat_oleh' => Auth::id(),
+                ]);
+
+                $lahan->decrement('sisa_slot');
+
+                $request->session()->put('parkir_masuk.lahan_parkir_id', $lahan->id);
+                $request->session()->put('parkir_masuk.nama_lahan', $lahan->nama_lahan);
+
+                $namaJenisKendaraan = JenisKendaraan::query()
+                    ->whereKey($jenisKendaraanId)
+                    ->value('nama_jenis_kendaraan');
+
+                return [
+                    'transaksi' => $transaksi,
+                    'ticket_data' => [
+                        'kode_tiket' => $transaksi->kode_tiket,
+                        'waktu_masuk' => $waktuMasuk->format('d M Y H:i:s'),
+                        'no_polisi' => $kendaraan->no_polisi,
+                        'jenis_kendaraan' => $namaJenisKendaraan,
+                        'nama_lahan' => $lahan->nama_lahan,
+                    ],
+                ];
+            });
+
+            return redirect()
+                ->route('transaksi-parkirs.masuk')
+                ->with('success', 'Kendaraan berhasil masuk parkir.')
+                ->with('ticket_data', $hasil['ticket_data']);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'Terjadi kesalahan saat memproses kendaraan masuk.');
+        }
+    }
+
+    private function getJenisKendaraanLahan(int $lahanParkirId)
+    {
+        return JenisKendaraan::query()
+            ->select('jenis_kendaraans.id', 'jenis_kendaraans.nama_jenis_kendaraan')
+            ->join('kapasitas_parkirs', 'kapasitas_parkirs.jenis_kendaraan_id', '=', 'jenis_kendaraans.id')
+            ->where('kapasitas_parkirs.lahan_parkir_id', $lahanParkirId)
+            ->where('kapasitas_parkirs.status_aktif', true)
+            ->distinct()
+            ->orderBy('jenis_kendaraans.nama_jenis_kendaraan')
+            ->get()
+            ->map(fn ($item) => (object) [
+                'id' => $item->id,
+                'nama' => $item->nama_jenis_kendaraan,
+            ]);
+    }
+
+    private function generateKodeTiket(): string
+    {
+        do {
+            $kode = 'TKT-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(5));
+        } while (TransaksiParkir::query()->where('kode_tiket', $kode)->exists());
+
+        return $kode;
+    }
+
+    private function normalizeNoPolisi(string $noPolisi): string
+    {
+        return strtoupper(preg_replace('/\s+/', '', trim($noPolisi)));
     }
 
     public function keluar(Request $request, $id)
@@ -285,20 +492,6 @@ class ParkirController extends Controller
                 'keterangan' => $transaksi->keterangan,
             ],
         ]);
-    }
-
-    private function generateKodeTiket(): string
-    {
-        do {
-            $kode = 'TKT-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(5));
-        } while (TransaksiParkir::where('kode_tiket', $kode)->exists());
-
-        return $kode;
-    }
-
-    private function normalizeNoPolisi(string $noPolisi): string
-    {
-        return strtoupper(str_replace(' ', '', trim($noPolisi)));
     }
 
     private function decodeAlasanDenda(?string $alasanDenda): array

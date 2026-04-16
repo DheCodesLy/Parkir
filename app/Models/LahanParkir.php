@@ -14,4 +14,14 @@ class LahanParkir extends Model
     {
         return $this->hasMany(KapasitasParkir::class);
     }
+
+    public function TarifParkir()
+    {
+        return $this->hasMany(TarifParkir::class);
+    }
+
+    public function transaksiParkirs()
+    {
+        return $this->hasMany(TransaksiParkir::class);
+    }
 }

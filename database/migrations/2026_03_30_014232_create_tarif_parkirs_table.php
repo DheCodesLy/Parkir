@@ -13,15 +13,16 @@ return new class extends Migration
     {
         Schema::create('tarif_parkirs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('jenis_kendaraan_id')->constrained('jenis_kendaraans')->cascadeOnDelete();
-            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks')->cascadeOnDelete();
+            $table->foreignId('lahan_id')->nullable()->constrained('lahan_parkirs')->restrictOnDelete();
+            $table->foreignId('jenis_kendaraan_id')->constrained('jenis_kendaraans')->restrictOnDelete();
+            $table->foreignId('jenis_pemilik_id')->constrained('jenis_pemiliks')->restrictOnDelete();
             $table->decimal('biaya_masuk')->default(0);
             $table->decimal('biaya_per_jam');
             $table->decimal('biaya_maksimal')->nullable();
             $table->integer('gratis_menit')->default(0);
             $table->boolean('status_aktif')->default(true);
             $table->dateTime('masa_berlaku');
-            $table->datetime('selesai_berlaku');
+            $table->datetime('selesai_berlaku')->nullable();
             $table->timestamps();
         });
     }

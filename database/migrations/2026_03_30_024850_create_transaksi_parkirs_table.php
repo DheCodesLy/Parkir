@@ -16,6 +16,7 @@ return new class extends Migration
             Schema::create('transaksi_parkirs', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('kendaraan_id')->constrained('kendaraans');
+                $table->foreignId('lahan_parkir_id')->constrained('lahan_parkirs')->restrictOnDelete();
                 $table->string('kode_tiket')->unique();
                 $table->dateTime('waktu_masuk');
                 $table->dateTime('waktu_keluar')->nullable();
