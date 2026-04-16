@@ -14,17 +14,17 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        // User::factory()->create([
-        //     'name' => 'Test User',
-        //     'email' => 'test@example.com',
-        // ]);
-
         $this->call([
-            UserSeeder::class,
+            // 1. Isi tabel master/induk dulu
             JenisKendaraanSeeder::class,
             JenisPemilikSeeder::class,
+            LahanParkirSeeder::class,
+            UserSeeder::class,
+
+            // 2. Baru isi tabel yang punya relasi (Foreign Key)
+            PemilikKendaraanSeeder::class,
+            KendaraanSeeder::class,
+            KapastitasParkirSeeder::class, // Harus setelah Lahan, Jenis Pemilik, dan Jenis Kendaraan
         ]);
     }
 }

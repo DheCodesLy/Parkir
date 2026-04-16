@@ -379,9 +379,9 @@
             </button>
         </div>
 
-        <form method="POST" action="{{ route('tarif-parkirs.store') }}" class="p-6">
+        <form id="tarifForm" method="POST" action="{{ route('tarif-parkirs.store') }}" class="p-6">
             @csrf
-            <input type="hidden" name="confirm_replace" value="{{ session('needs_confirmation') ? 1 : 0 }}">
+            <input type="hidden" name="confirm_replace" id="confirm_replace" value="0">
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div class="md:col-span-2">
@@ -608,48 +608,26 @@
     </div>
 </div>
 
-<div id="nonaktifModal" class="fixed inset-0 z-[102] hidden overflow-y-auto px-3 py-4 sm:px-4 sm:py-8">
+<div id="nonaktifModal" class="fixed inset-0 z-[102] hidden overflow-y-auto px-4 py-6 flex-col items-center justify-center">
     <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onclick="closeNonaktifModal()"></div>
 
-    <div class="relative mx-auto w-full max-w-lg rounded-3xl bg-white shadow-2xl dark:bg-slate-900">
-        <div class="border-b border-slate-100 px-6 py-5 dark:border-slate-800">
-            <h2 class="text-xl font-black text-slate-900 dark:text-white">Nonaktifkan Tarif</h2>
-            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Tarif akan dinonaktifkan dan tidak dipakai lagi setelah waktu yang ditentukan.</p>
+    <div class="relative mx-auto w-full max-w-md rounded-3xl bg-white shadow-2xl dark:bg-slate-900 p-8 text-center">
+        <div class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-rose-50 text-rose-500 dark:bg-rose-900/20">
+            <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>
         </div>
+        <h3 class="text-xl font-black text-slate-900 dark:text-white">Nonaktifkan Tarif?</h3>
+        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400" id="nonaktifLabel"></p>
+        <p class="mt-2 text-xs font-bold uppercase tracking-widest text-rose-500">Tarif ini akan diakhiri saat ini juga.</p>
 
-        <form id="nonaktifForm" method="POST" class="p-6">
+        <form id="nonaktifForm" method="POST" class="mt-6 flex flex-col gap-3">
             @csrf
             @method('PATCH')
-
-            <div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-                <span class="font-bold">Tarif:</span>
-                <span id="nonaktifLabel"></span>
-            </div>
-
-            <div>
-                <label class="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">Waktu Nonaktif</label>
-                <input
-                    type="datetime-local"
-                    name="waktu_nonaktif"
-                    class="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-primary-500 focus:ring-4 focus:ring-primary-50 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-primary-950"
-                >
-            </div>
-
-            <div class="mt-6 flex flex-col-reverse gap-3 border-t border-slate-100 pt-6 dark:border-slate-800 sm:flex-row sm:justify-end">
-                <button
-                    type="button"
-                    onclick="closeNonaktifModal()"
-                    class="w-full rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-500 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 sm:w-auto"
-                >
-                    Batal
-                </button>
-                <button
-                    type="submit"
-                    class="w-full rounded-xl bg-rose-500 px-8 py-3 text-sm font-bold text-white shadow-lg transition hover:bg-rose-600 sm:w-auto"
-                >
-                    Ya, Nonaktifkan
-                </button>
-            </div>
+            <button type="submit" class="w-full rounded-2xl bg-rose-500 py-4 text-sm font-bold text-white shadow-lg transition hover:bg-rose-600">
+                Ya, Nonaktifkan Sekarang
+            </button>
+            <button type="button" onclick="closeNonaktifModal()" class="w-full py-4 text-sm font-bold text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200">
+                Batal
+            </button>
         </form>
     </div>
 </div>
@@ -731,31 +709,56 @@
     </div>
 </div>
 
+<div id="confirmModal" class="fixed inset-0 z-[110] hidden overflow-y-auto px-4 py-6 flex-col items-center justify-center">
+    <div class="fixed inset-0 bg-slate-900/80 backdrop-blur-md" onclick="closeConfirmModal()"></div>
+    <div class="relative mx-auto w-full max-w-md scale-100 transform rounded-3xl bg-white p-8 shadow-2xl transition-all dark:bg-slate-900 text-center">
+        <div class="mb-6 flex justify-center">
+            <div class="flex h-20 w-20 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-900/20">
+                <svg class="h-10 w-10 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+            </div>
+        </div>
+        <h3 class="text-xl font-black text-slate-900 dark:text-white">Timpa Tarif Aktif?</h3>
+        <p class="mt-3 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+            Sistem mendeteksi adanya tarif lama yang tumpang tindih dengan data baru ini.
+            Jika Anda melanjutkan, <strong>tarif lama akan dinonaktifkan otomatis</strong> dan digantikan.
+        </p>
+        <div class="mt-8 flex flex-col gap-3">
+            <button type="button" onclick="executeOverwrite()" class="w-full rounded-2xl bg-primary-600 py-4 text-sm font-black text-white shadow-xl transition hover:bg-primary-700 active:scale-95">
+                Ya, Lanjutkan Penyimpanan
+            </button>
+            <button type="button" onclick="closeConfirmModal()" class="w-full py-4 text-sm font-bold text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-200">
+                Batalkan
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
     const createModal = document.getElementById('createModal');
     const showModal = document.getElementById('showModal');
     const nonaktifModal = document.getElementById('nonaktifModal');
     const berlakuModal = document.getElementById('berlakuModal');
+    const confirmModal = document.getElementById('confirmModal');
+
     const nonaktifForm = document.getElementById('nonaktifForm');
     const nonaktifLabel = document.getElementById('nonaktifLabel');
+
+    const tarifForm = document.getElementById('tarifForm');
+    const confirmReplaceInput = document.getElementById('confirm_replace');
 
     const lahanSelect = document.getElementById('lahan_id');
     const lahanSearch = document.getElementById('lahanSearch');
     const jenisKendaraanSelect = document.getElementById('jenis_kendaraan_id');
 
-    function lockBody() {
-        document.body.style.overflow = 'hidden';
-    }
-
-    function unlockBody() {
-        document.body.style.overflow = '';
-    }
+    function lockBody() { document.body.style.overflow = 'hidden'; }
+    function unlockBody() { document.body.style.overflow = ''; }
 
     function openCreateModal() {
         createModal.classList.remove('hidden');
         lockBody();
     }
-
     function closeCreateModal() {
         createModal.classList.add('hidden');
         unlockBody();
@@ -775,21 +778,21 @@
         showModal.classList.remove('hidden');
         lockBody();
     }
-
     function closeShowModal() {
         showModal.classList.add('hidden');
         unlockBody();
     }
 
     function openNonaktifModal(data) {
-        nonaktifForm.action = `/tarif-parkirs/${data.id}/nonaktifkan`;
+        nonaktifForm.action = `/tarif-parkir/${data.id}/nonaktifkan`;
         nonaktifLabel.innerText = data.label;
         nonaktifModal.classList.remove('hidden');
+        nonaktifModal.classList.add('flex');
         lockBody();
     }
-
     function closeNonaktifModal() {
         nonaktifModal.classList.add('hidden');
+        nonaktifModal.classList.remove('flex');
         unlockBody();
     }
 
@@ -797,31 +800,38 @@
         berlakuModal.classList.remove('hidden');
         lockBody();
     }
-
     function closeBerlakuModal() {
         berlakuModal.classList.add('hidden');
         unlockBody();
     }
 
+    function openConfirmModal() {
+        confirmModal.classList.remove('hidden');
+        confirmModal.classList.add('flex');
+        lockBody();
+    }
+    function closeConfirmModal() {
+        confirmModal.classList.add('hidden');
+        confirmModal.classList.remove('flex');
+        unlockBody();
+    }
+
+    function executeOverwrite() {
+        confirmReplaceInput.value = "1";
+        tarifForm.submit();
+    }
+
     async function loadJenisKendaraanByLahan(lahanId, selectedId = null) {
         try {
             jenisKendaraanSelect.innerHTML = '<option value="">Memuat jenis kendaraan...</option>';
-
             const url = new URL("{{ route('tarif-parkirs.kendaraan-by-lahan') }}", window.location.origin);
-
-            if (lahanId) {
-                url.searchParams.set('lahan_id', lahanId);
-            }
+            if (lahanId) { url.searchParams.set('lahan_id', lahanId); }
 
             const response = await fetch(url.toString(), {
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'application/json'
-                }
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
             });
 
             const result = await response.json();
-
             jenisKendaraanSelect.innerHTML = '<option value="">Pilih Jenis Kendaraan</option>';
 
             if (result.success && Array.isArray(result.data)) {
@@ -831,7 +841,6 @@
                     option.textContent = item.nama_jenis_kendaraan;
                     jenisKendaraanSelect.appendChild(option);
                 });
-
                 if (selectedId) {
                     jenisKendaraanSelect.value = String(selectedId);
                 } else if (result.auto_selected_id) {
@@ -855,13 +864,8 @@
         lahanSearch.addEventListener('input', function () {
             const keyword = this.value.toLowerCase().trim();
             const options = Array.from(lahanSelect.options);
-
             options.forEach((option, index) => {
-                if (index === 0) {
-                    option.hidden = false;
-                    return;
-                }
-
+                if (index === 0) { option.hidden = false; return; }
                 option.hidden = !option.text.toLowerCase().includes(keyword);
             });
         });
@@ -873,11 +877,18 @@
             closeShowModal();
             closeNonaktifModal();
             closeBerlakuModal();
+            closeConfirmModal();
         }
     });
 
     @if($errors->any() || session('needs_confirmation'))
         openCreateModal();
+    @endif
+
+    @if(session('needs_confirmation'))
+        document.addEventListener('DOMContentLoaded', function() {
+            openConfirmModal();
+        });
     @endif
 
     @if(old('lahan_id') || old('jenis_kendaraan_id'))
@@ -892,8 +903,8 @@
     :root {
         --color-primary-400: #60a5fa;
         --color-primary-500: #3b82f6;
-        --color-primary-600: #2563eb;
-        --color-primary-700: #1d4ed8;
+        --color-primary-600: #1e3a8a;
+        --color-primary-700: #172554;
     }
 
     .text-primary-400 { color: var(--color-primary-400); }
@@ -902,10 +913,11 @@
     .bg-primary-600 { background-color: var(--color-primary-600); }
     .hover\:bg-primary-700:hover { background-color: var(--color-primary-700); }
     .border-primary-200 { border-color: #bfdbfe; }
+
     .dark .dark\:text-primary-400 { color: var(--color-primary-400); }
     .dark .dark\:border-primary-900\/50 { border-color: rgba(30, 58, 138, 0.5); }
     .focus\:border-primary-500:focus { border-color: var(--color-primary-500); }
-    .focus\:ring-primary-50:focus { --tw-ring-color: rgba(59, 130, 246, 0.12); }
+    .focus\:ring-primary-50:focus { --tw-ring-color: rgba(30, 58, 138, 0.15); }
     .dark .dark\:focus\:ring-primary-950:focus { --tw-ring-color: rgba(23, 37, 84, 0.5); }
     .dark .dark\:bg-primary-600 { background-color: var(--color-primary-600); }
     .dark .dark\:hover\:bg-primary-700:hover { background-color: var(--color-primary-700); }

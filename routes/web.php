@@ -1,55 +1,76 @@
 <?php
 
-use App\Http\Controllers\JenisKendaraanController;
-use App\Http\Controllers\JenisPemilikController;
-use App\Http\Controllers\LahanParkirController;
-use App\Http\Controllers\MetodePembayaranController;
-use App\Http\Controllers\ParkirController;
-use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\RoleController;
-use App\Http\Controllers\TarifParkirController;
-use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\{
+    JenisKendaraanController,
+    JenisPemilikController,
+    LahanParkirController,
+    MetodePembayaranController,
+    ParkirController,
+    ProfileController,
+    RoleController,
+    TarifParkirController,
+    UserController
+};
 
+// --- PUBLIC ROUTES ---
 Route::redirect('/', '/login');
 
-Route::resource('jenis-kendaraan', JenisKendaraanController::class);
-Route::resource('jenis-pemilik', JenisPemilikController::class);
-Route::resource('role', RoleController::class);
-Route::resource('metode-pembayaran', MetodePembayaranController::class);
+// --- AUTHENTICATED ROUTES ---
+Route::middleware(['auth', 'verified'])->group(function () {
 
-Route::get('/transaksi-parkirs', [ParkirController::class, 'index'])->name('transaksi-parkirs.index');
-Route::get('/transaksi-parkirs/form-masuk', [ParkirController::class, 'formMasuk'])->name('transaksi-parkirs.masuk');
-Route::get('/transaksi-parkirs/{id}', [ParkirController::class, 'show'])->name('transaksi-parkirs.show');
-Route::post('/transaksi-parkirs/masuk', [ParkirController::class, 'masuk'])->name('transaksi-parkirs.akses-masuk');
-Route::post('/transaksi-parkirs/{id}/keluar', [ParkirController::class, 'keluar'])->name('transaksi-parkirs.keluar');
-Route::get('/LahanParkir/check-nama', [LahanParkirController::class, 'checkNamaLahan'])->name('LahanParkir.check-nama');
-Route::resource('LahanParkir', LahanParkirController::class);
-Route::post('/pilih-lahan', [ParkirController::class, 'pilihLahan'])
-        ->name('transaksi-parkirs.pilih-lahan');
-Route::resource('users', UserController::class);
-Route::get('/tarif-parkir', [TarifParkirController::class, 'index'])->name('tarif-parkirs.index');
+    // 1. DASHBOARD
+    Route::get('/dashboard', fn() => view('dashboard'))->name('dashboard');
 
-Route::get('/tarif-parkirs/kendaraan-by-lahan', [TarifParkirController::class, 'kendaraanByLahan'])
-    ->name('tarif-parkirs.kendaraan-by-lahan');
-    
-Route::post('/tarif-parkir', [TarifParkirController::class, 'store'])->name('tarif-parkirs.store');
-Route::get('/tarif-parkir/berlaku', [TarifParkirController::class, 'berlaku'])->name('tarif-parkirs.berlaku');
-Route::get('/tarif-parkir/{tarifParkir}', [TarifParkirController::class, 'show'])->name('tarif-parkirs.show');
-Route::patch('/tarif-parkir/{tarifParkir}/nonaktifkan', [TarifParkirController::class, 'nonaktifkan'])->name('tarif-parkirs.nonaktifkan');
+    // 2. TRANSAKSI PARKIR (ParkirPro Core)
+    // PERHATIKAN: Route statis (form-masuk, form-keluar) harus di atas route parameter {id}
+    Route::controller(ParkirController::class)->prefix('transaksi-parkirs')->name('transaksi-parkirs.')->group(function () {
+        Route::get('/', 'index')->name('index');
+        Route::get('/form-masuk', 'formMasuk')->name('masuk');
+        Route::get('/form-keluar', 'formKeluar')->name('form-keluar'); // Route ini sekarang aman dari 404
+        Route::get('/parkir/autocomplete-plat', [ParkirController::class, 'autocompletePlat'])->name('autocomplete.plat');
+        Route::get('/{id}', 'show')->name('show');
 
-Route::resource('metode-pembayaran', MetodePembayaranController::class);
-Route::put('metode-pembayaran/reorder', [MetodePembayaranController::class, 'reorder'])->name('metode-pembayaran.reorder');
-Route::patch('metode-pembayaran/{metodePembayaran}/toggle-status', [MetodePembayaranController::class, 'toggleStatus'])->name('metode-pembayaran.toggle-status');
+        Route::post('/masuk', 'masuk')->name('akses-masuk');
+        Route::post('/pilih-lahan', 'pilihLahan')->name('pilih-lahan');
+        Route::post('/{id}/keluar', 'keluar')->name('keluar');
+    });
 
-Route::get('/dashboard', function () {
-    return view('dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+    // 3. MASTER DATA: LAHAN PARKIR
+    Route::get('/LahanParkir/check-nama', [LahanParkirController::class, 'checkNamaLahan'])->name('LahanParkir.check-nama');
+    Route::resource('LahanParkir', LahanParkirController::class);
 
-Route::middleware('auth')->group(function () {
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    // 4. MASTER DATA: TARIF PARKIR
+    Route::controller(TarifParkirController::class)->prefix('tarif-parkir')->name('tarif-parkirs.')->group(function () {
+        Route::get('/', 'index')->name('index');
+        Route::get('/berlaku', 'berlaku')->name('berlaku');
+        Route::get('/kendaraan-by-lahan', 'kendaraanByLahan')->name('kendaraan-by-lahan');
+        Route::get('/{tarifParkir}', 'show')->name('show');
+
+        Route::post('/', 'store')->name('store');
+        Route::patch('/{tarifParkir}/nonaktifkan', 'nonaktifkan')->name('nonaktifkan');
+    });
+
+    // 5. MASTER DATA: METODE PEMBAYARAN
+    Route::controller(MetodePembayaranController::class)->prefix('metode-pembayaran')->name('metode-pembayaran.')->group(function () {
+        Route::put('/reorder', 'reorder')->name('reorder');
+        Route::patch('/{metodePembayaran}/toggle-status', 'toggleStatus')->name('toggle-status');
+    });
+    Route::resource('metode-pembayaran', MetodePembayaranController::class)->except(['reorder', 'toggleStatus']);
+
+    // 6. MANAJEMEN USER & ROLE
+    Route::resource('users', UserController::class);
+    Route::resource('role', RoleController::class);
+    Route::resource('jenis-kendaraan', JenisKendaraanController::class);
+    Route::resource('jenis-pemilik', JenisPemilikController::class);
+
+    // 7. PROFILE SETTINGS
+    Route::controller(ProfileController::class)->prefix('profile')->name('profile.')->group(function () {
+        Route::get('/', 'edit')->name('edit');
+        Route::patch('/', 'update')->name('update');
+        Route::delete('/', 'destroy')->name('destroy');
+    });
+
 });
 
 require __DIR__.'/auth.php';

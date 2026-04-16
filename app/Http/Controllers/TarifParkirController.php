@@ -15,7 +15,8 @@ class TarifParkirController extends Controller
     public function index(Request $request)
     {
         $request->validate([
-            'lahan_id' => ['nullable', 'integer', 'exists:lahans,id'],
+            // Sesuaikan nama tabel 'lahan_parkirs' (sesuai konvensi model LahanParkir)
+            'lahan_id' => ['nullable', 'integer', 'exists:lahan_parkirs,id'],
             'jenis_kendaraan_id' => ['nullable', 'integer', 'exists:jenis_kendaraans,id'],
             'jenis_pemilik_id' => ['nullable', 'integer', 'exists:jenis_pemiliks,id'],
             'status_aktif' => ['nullable', 'in:0,1'],
@@ -27,7 +28,7 @@ class TarifParkirController extends Controller
             ? Carbon::parse($request->berlaku_pada)->startOfSecond()
             : null;
 
-        $tarifParkirs = TarifParkir::with(['lahan', 'jenisKendaraan', 'jenisPemilik'])
+        $tarifParkirs = TarifParkir::with(['LahanParkir', 'JenisKendaraan', 'JenisPemilik'])
             ->when($request->filled('lahan_id'), function ($query) use ($request) {
                 $query->where('lahan_id', $request->integer('lahan_id'));
             })
@@ -89,7 +90,7 @@ class TarifParkirController extends Controller
         ));
     }
 
-    public function store(Request $request)
+        public function store(Request $request)
     {
         $validated = $request->validate([
             'lahan_id' => ['nullable', 'integer', 'exists:lahan_parkirs,id'],
@@ -104,67 +105,60 @@ class TarifParkirController extends Controller
             'confirm_replace' => ['nullable', 'in:0,1'],
         ]);
 
-        $validated['lahan_id'] = $validated['lahan_id'] ?? null;
-        $validated['biaya_masuk'] = $validated['biaya_masuk'] ?? 0;
-        $validated['gratis_menit'] = $validated['gratis_menit'] ?? 0;
-
+        $lahanId = $validated['lahan_id'] ?? null;
         $masaBerlaku = Carbon::parse($validated['masa_berlaku'])->startOfSecond();
-        $selesaiBerlaku = !empty($validated['selesai_berlaku'])
-            ? Carbon::parse($validated['selesai_berlaku'])->startOfSecond()
-            : null;
+        $selesaiBerlaku = !empty($validated['selesai_berlaku']) ? Carbon::parse($validated['selesai_berlaku'])->startOfSecond() : null;
 
-        return DB::transaction(function () use ($validated, $masaBerlaku, $selesaiBerlaku) {
-            $conflicts = $this->buildConflictQuery(
-                $validated['lahan_id'],
-                $validated['jenis_kendaraan_id'],
-                $validated['jenis_pemilik_id'],
-                $masaBerlaku,
-                $selesaiBerlaku
-            )->lockForUpdate()->get();
+        // Cek apakah ada tarif aktif yang tumpang tindih
+        $conflicts = $this->buildConflictQuery(
+            $lahanId,
+            $validated['jenis_kendaraan_id'],
+            $validated['jenis_pemilik_id'],
+            $masaBerlaku,
+            $selesaiBerlaku
+        )->get();
 
-            if ($conflicts->isNotEmpty() && empty($validated['confirm_replace'])) {
-                return redirect()
-                    ->route('tarif-parkirs.index')
-                    ->withInput()
-                    ->with('warning', 'Sudah ada tarif aktif atau tarif terjadwal untuk kombinasi yang sama. Simpan ulang dengan konfirmasi penggantian.')
-                    ->with('needs_confirmation', true);
-            }
+        // Jika ada konflik dan belum ada konfirmasi dari user
+        if ($conflicts->isNotEmpty() && !$request->boolean('confirm_replace')) {
+            return redirect()->back()
+                ->withInput()
+                ->with('needs_confirmation', true)
+                ->with('conflict_count', $conflicts->count());
+        }
 
-            foreach ($conflicts as $conflict) {
-                $conflictStart = Carbon::parse($conflict->masa_berlaku)->startOfSecond();
-
-                if ($conflictStart->lt($masaBerlaku)) {
-                    $conflict->update([
-                        'selesai_berlaku' => $masaBerlaku,
-                    ]);
-                } else {
+        return DB::transaction(function () use ($validated, $lahanId, $masaBerlaku, $selesaiBerlaku, $conflicts) {
+            // Jika dikonfirmasi, nonaktifkan semua data lama yang konflik
+            if ($conflicts->isNotEmpty()) {
+                foreach ($conflicts as $conflict) {
                     $conflict->update([
                         'status_aktif' => false,
+                        'selesai_berlaku' => $masaBerlaku // Berakhir tepat saat yang baru mulai
                     ]);
                 }
             }
 
+            // Buat tarif baru
             TarifParkir::create([
-                'lahan_id' => $validated['lahan_id'],
+                'lahan_id' => $lahanId,
                 'jenis_kendaraan_id' => $validated['jenis_kendaraan_id'],
                 'jenis_pemilik_id' => $validated['jenis_pemilik_id'],
-                'biaya_masuk' => $validated['biaya_masuk'],
+                'biaya_masuk' => $validated['biaya_masuk'] ?? 0,
                 'biaya_per_jam' => $validated['biaya_per_jam'],
                 'biaya_maksimal' => $validated['biaya_maksimal'] ?? null,
-                'gratis_menit' => $validated['gratis_menit'],
+                'gratis_menit' => $validated['gratis_menit'] ?? 0,
                 'status_aktif' => true,
                 'masa_berlaku' => $masaBerlaku,
                 'selesai_berlaku' => $selesaiBerlaku,
             ]);
 
-            return redirect()
-                ->route('tarif-parkirs.index')
-                ->with('success', 'Tarif parkir berhasil disimpan.');
+            return redirect()->route('tarif-parkirs.index')
+                ->with('success', 'Tarif parkir baru berhasil diaktifkan dan tarif lama telah dinonaktifkan.');
         });
     }
 
     public function show(TarifParkir $tarifParkir)
     {
+        // Sesuaikan nama relasi dengan Model
         $tarifParkir->load(['lahan', 'jenisKendaraan', 'jenisPemilik']);
 
         return redirect()
@@ -172,49 +166,31 @@ class TarifParkirController extends Controller
             ->with('show_tarif', $tarifParkir);
     }
 
-    public function nonaktifkan(Request $request, TarifParkir $tarifParkir)
+    public function nonaktifkan(TarifParkir $tarifParkir)
     {
-        $validated = $request->validate([
-            'waktu_nonaktif' => ['nullable', 'date'],
-        ]);
-
+        // Jika sudah nonaktif, langsung kembalikan
         if (!$tarifParkir->status_aktif) {
-            return redirect()
-                ->route('tarif-parkirs.index')
+            return redirect()->route('tarif-parkirs.index')
                 ->with('warning', 'Tarif parkir sudah nonaktif.');
         }
 
-        $waktuNonaktif = !empty($validated['waktu_nonaktif'])
-            ? Carbon::parse($validated['waktu_nonaktif'])->startOfSecond()
-            : now()->startOfSecond();
+        $waktuSekarang = now()->startOfSecond();
 
-        DB::transaction(function () use ($tarifParkir, $waktuNonaktif) {
-            $updateData = [
+        DB::transaction(function () use ($tarifParkir, $waktuSekarang) {
+            $tarifParkir->update([
                 'status_aktif' => false,
-            ];
-
-            if (
-                Carbon::parse($tarifParkir->masa_berlaku)->startOfSecond()->lte($waktuNonaktif) &&
-                (
-                    is_null($tarifParkir->selesai_berlaku) ||
-                    Carbon::parse($tarifParkir->selesai_berlaku)->startOfSecond()->gt($waktuNonaktif)
-                )
-            ) {
-                $updateData['selesai_berlaku'] = $waktuNonaktif;
-            }
-
-            $tarifParkir->update($updateData);
+                'selesai_berlaku' => $waktuSekarang // Otomatis terset ke waktu sekarang
+            ]);
         });
 
-        return redirect()
-            ->route('tarif-parkirs.index')
+        return redirect()->route('tarif-parkirs.index')
             ->with('success', 'Tarif parkir berhasil dinonaktifkan.');
     }
 
     public function berlaku(Request $request)
     {
         $validated = $request->validate([
-            'lahan_id' => ['nullable', 'integer', 'exists:lahans,id'],
+            'lahan_id' => ['nullable', 'integer', 'exists:lahan_parkirs,id'],
             'jenis_kendaraan_id' => ['required', 'integer', 'exists:jenis_kendaraans,id'],
             'jenis_pemilik_id' => ['required', 'integer', 'exists:jenis_pemiliks,id'],
             'waktu' => ['nullable', 'date'],
@@ -224,6 +200,7 @@ class TarifParkirController extends Controller
             ? Carbon::parse($validated['waktu'])->startOfSecond()
             : now()->startOfSecond();
 
+        // UBAH: LahanParkir menjadi lahan agar sinkron
         $tarif = TarifParkir::with(['lahan', 'jenisKendaraan', 'jenisPemilik'])
             ->where('status_aktif', true)
             ->where('jenis_kendaraan_id', $validated['jenis_kendaraan_id'])
@@ -266,7 +243,7 @@ class TarifParkirController extends Controller
     public function kendaraanByLahan(Request $request)
     {
         $request->validate([
-            'lahan_id' => ['nullable', 'integer', 'exists:lahans,id'],
+            'lahan_id' => ['nullable', 'integer', 'exists:lahan_parkirs,id'],
         ]);
 
         $lahanId = $request->input('lahan_id');
@@ -296,33 +273,29 @@ class TarifParkirController extends Controller
             ->get();
     }
 
-    private function buildConflictQuery(
-        ?int $lahanId,
-        int $jenisKendaraanId,
-        int $jenisPemilikId,
-        Carbon $masaBerlaku,
-        ?Carbon $selesaiBerlaku
-    ) {
+    private function buildConflictQuery($lahanId, $jenisKendaraanId, $jenisPemilikId, $masaBerlaku, $selesaiBerlaku)
+    {
         return TarifParkir::query()
+            ->where('status_aktif', true)
             ->where('jenis_kendaraan_id', $jenisKendaraanId)
             ->where('jenis_pemilik_id', $jenisPemilikId)
-            ->where('status_aktif', true)
-            ->when(
-                is_null($lahanId),
-                function ($query) {
+            ->where(function ($query) use ($lahanId) {
+                if (is_null($lahanId)) {
                     $query->whereNull('lahan_id');
-                },
-                function ($query) use ($lahanId) {
+                } else {
                     $query->where('lahan_id', $lahanId);
                 }
-            )
-            ->where(function ($query) use ($masaBerlaku) {
-                $query->whereNull('selesai_berlaku')
+            })
+            ->where(function ($query) use ($masaBerlaku, $selesaiBerlaku) {
+                // Logika tumpang tindih waktu
+                $query->where(function ($q) use ($masaBerlaku) {
+                    $q->whereNull('selesai_berlaku')
                     ->orWhere('selesai_berlaku', '>', $masaBerlaku);
-            })
-            ->when($selesaiBerlaku, function ($query) use ($selesaiBerlaku) {
-                $query->where('masa_berlaku', '<', $selesaiBerlaku);
-            })
-            ->orderBy('masa_berlaku');
+                });
+
+                if ($selesaiBerlaku) {
+                    $query->where('masa_berlaku', '<', $selesaiBerlaku);
+                }
+            });
     }
 }

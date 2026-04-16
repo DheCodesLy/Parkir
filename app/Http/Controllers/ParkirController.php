@@ -401,6 +401,88 @@ class ParkirController extends Controller
         return strtoupper(preg_replace('/\s+/', '', trim($noPolisi)));
     }
 
+    public function formKeluar()
+    {
+        return view('parkir.parkir-keluar');
+    }
+
+    // Method baru untuk mencari data kendaraan keluar berdasarkan kode tiket atau plat nomor
+    public function cariDataKeluar($keyword)
+    {
+        $normalizedKeyword = strtoupper(preg_replace('/\s+/', '', trim($keyword)));
+
+        $transaksi = TransaksiParkir::with([
+            'kendaraan.jenisKendaraan',
+            'kendaraan.pemilik.jenisPemilik',
+            'kendaraan.pemilik.User:id,name'
+        ])
+        ->where('status_parkir', 'parkir')
+        ->where(function ($query) use ($keyword, $normalizedKeyword) {
+            $query->where('kode_tiket', $keyword)
+                  ->orWhereHas('kendaraan', function ($kQuery) use ($normalizedKeyword) {
+                      $kQuery->whereRaw("UPPER(REPLACE(no_polisi, ' ', '')) = ?", [$normalizedKeyword]);
+                  });
+        })
+        ->first();
+
+        if (!$transaksi) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tiket atau Plat Nomor tidak ditemukan / Kendaraan sudah keluar.'
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $transaksi->id,
+                'kode_tiket' => $transaksi->kode_tiket,
+                'nomor_plat' => $transaksi->kendaraan?->no_polisi,
+                'jenis_kendaraan' => $transaksi->kendaraan?->jenisKendaraan?->nama_jenis_kendaraan,
+                'nama_pemilik' => $transaksi->kendaraan?->pemilik?->User?->name ?? 'Umum/Tamu',
+                'waktu_masuk' => $transaksi->waktu_masuk,
+            ]
+        ]);
+    }
+
+    public function autocompletePlat(Request $request)
+    {
+        $term = $request->get('term');
+
+        // Jika tidak ada inputan, kembalikan array kosong
+        if (!$term) {
+            return response()->json([]);
+        }
+
+        // Normalisasi term: hilangkan spasi dan jadikan huruf besar
+        // agar pencarian lebih fleksibel (misal user ketik "D1234" tetap ketemu "D 1234 AB")
+        $normalizedTerm = strtoupper(preg_replace('/\s+/', '', $term));
+
+        // Query ke TransaksiParkir yang masih berstatus 'parkir'
+        $transaksiAktif = TransaksiParkir::with('kendaraan')
+            ->where('status_parkir', 'parkir')
+            ->whereHas('kendaraan', function ($query) use ($term, $normalizedTerm) {
+                $query->where('no_polisi', 'LIKE', '%' . $term . '%')
+                      ->orWhereRaw("UPPER(REPLACE(no_polisi, ' ', '')) LIKE ?", ['%' . $normalizedTerm . '%']);
+            })
+            ->take(10) // Batasi hasil maksimal 10 agar dropdown tidak berat
+            ->get();
+
+        $results = [];
+        foreach ($transaksiAktif as $transaksi) {
+            if ($transaksi->kendaraan) {
+                $results[] = [
+                    // 'label' adalah teks yang akan muncul di daftar dropdown
+                    'label' => $transaksi->kendaraan->no_polisi . ' (' . $transaksi->kode_tiket . ')',
+                    // 'value' adalah teks yang akan diisikan ke dalam input text saat item dipilih
+                    'value' => $transaksi->kendaraan->no_polisi
+                ];
+            }
+        }
+
+        return response()->json($results);
+    }
+
     public function keluar(Request $request, $id)
     {
         $validated = $request->validate([
