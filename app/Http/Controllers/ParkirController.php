@@ -38,13 +38,13 @@ class ParkirController extends Controller
             $query->where('status_tiket', $request->status_tiket);
         }
 
-        // Fitur Pencarian
+        // Fitur Pencarian (Kebal spasi dan strip)
         if ($request->filled('search')) {
-            $search = trim($request->search);
+            $search = strtoupper(preg_replace('/[^A-Z0-9]/', '', $request->search));
             $query->where(function ($q) use ($search) {
-                $q->where('kode_tiket', 'like', "%{$search}%")
-                    ->orWhereHas('kendaraan', function ($kendaraanQuery) use ($search) {
-                        $kendaraanQuery->where('no_polisi', 'like', "%{$search}%");
+                $q->whereRaw("UPPER(REPLACE(kode_tiket, '-', '')) LIKE ?", ["%{$search}%"])
+                    ->orWhereHas('kendaraan', function ($kQuery) use ($search) {
+                        $kQuery->whereRaw("UPPER(REPLACE(REPLACE(no_polisi, ' ', ''), '-', '')) LIKE ?", ["%{$search}%"]);
                     });
             });
         }
@@ -54,7 +54,7 @@ class ParkirController extends Controller
             ->latest('id')
             ->paginate($request->get('per_page', 10))
             ->through(function ($item) {
-                return (object) [ // Gunakan (object) agar di Blade bisa dipanggil dengan panah ->
+                return (object) [
                     'id' => $item->id,
                     'nomor_plat' => $item->kendaraan?->no_polisi,
                     'jenis_kendaraan' => $item->kendaraan?->jenisKendaraan?->nama_jenis_kendaraan,
@@ -74,7 +74,7 @@ class ParkirController extends Controller
             'kendaraan',
             'kendaraan.jenisKendaraan',
             'kendaraan.pemilik',
-            'kendaraan.pemilik.User:id,name', // Tambahan relasi untuk mengambil nama dari tabel users
+            'kendaraan.pemilik.User:id,name',
             'kendaraan.pemilik.jenisPemilik',
             'dibuatOleh:id,name,email',
             'diperbaruiOleh:id,name,email',
@@ -87,7 +87,7 @@ class ParkirController extends Controller
                 'kode_tiket' => $transaksi->kode_tiket,
                 'nomor_plat' => $transaksi->kendaraan?->no_polisi,
                 'jenis_kendaraan' => $transaksi->kendaraan?->jenisKendaraan?->nama_jenis_kendaraan,
-                'nama_pemilik' => $transaksi->kendaraan?->pemilik?->User?->name, // Mengambil Nama Pemilik
+                'nama_pemilik' => $transaksi->kendaraan?->pemilik?->User?->name,
                 'jenis_pemilik' => $transaksi->kendaraan?->pemilik?->jenisPemilik?->nama_jenis_pemilik,
                 'merk' => $transaksi->kendaraan?->merk,
                 'warna' => $transaksi->kendaraan?->warna,
@@ -200,6 +200,7 @@ class ParkirController extends Controller
 
         try {
             $hasil = DB::transaction(function () use ($validated, $request) {
+                // Gunakan fungsi normalisasi yang menjaga format parkir standar
                 $noPolisi = $this->normalizeNoPolisi($validated['no_polisi']);
                 $waktuMasuk = now();
 
@@ -247,10 +248,13 @@ class ParkirController extends Controller
                     ]);
                 }
 
+                // Pencarian kendaraan yang kebal terhadap spasi/format aneh
+                $cleanNoPolisi = preg_replace('/[^A-Z0-9]/', '', $noPolisi);
+
                 $kendaraan = Kendaraan::query()
                     ->with('pemilik')
                     ->lockForUpdate()
-                    ->whereRaw("UPPER(REPLACE(no_polisi, ' ', '')) = ?", [$noPolisi])
+                    ->whereRaw("UPPER(REPLACE(REPLACE(no_polisi, ' ', ''), '-', '')) = ?", [$cleanNoPolisi])
                     ->first();
 
                 if ($kendaraan && (int) $kendaraan->jenis_kendaraan_id !== $jenisKendaraanId) {
@@ -398,7 +402,8 @@ class ParkirController extends Controller
 
     private function normalizeNoPolisi(string $noPolisi): string
     {
-        return strtoupper(preg_replace('/\s+/', '', trim($noPolisi)));
+        // Ubah jadi huruf besar dan pastikan spasi rapi (tidak ada spasi ganda)
+        return strtoupper(preg_replace('/\s+/', ' ', trim($noPolisi)));
     }
 
     public function formKeluar()
@@ -406,29 +411,37 @@ class ParkirController extends Controller
         return view('parkir.parkir-keluar');
     }
 
-    // Method baru untuk mencari data kendaraan keluar berdasarkan kode tiket atau plat nomor
     public function cariDataKeluar($keyword)
     {
-        $normalizedKeyword = strtoupper(preg_replace('/\s+/', '', trim($keyword)));
+        // Ekstrak hanya huruf & angka murni (mengabaikan spasi dan strip)
+        $normalizedKeyword = strtoupper(preg_replace('/[^A-Z0-9]/', '', $keyword));
 
         $transaksi = TransaksiParkir::with([
             'kendaraan.jenisKendaraan',
             'kendaraan.pemilik.jenisPemilik',
             'kendaraan.pemilik.User:id,name'
         ])
-        ->where('status_parkir', 'parkir')
+        // Gunakan whereNull dan orWhere untuk menjaga kehandalan jika sistem parkirnya sedikit anomali
+        ->where(function($q) {
+            $q->whereNull('waktu_keluar')
+              ->orWhere('status_parkir', 'parkir');
+        })
         ->where(function ($query) use ($keyword, $normalizedKeyword) {
+            // Cocokkan tiket atau plat nomor dari string mentah
             $query->where('kode_tiket', $keyword)
+                  ->orWhereRaw("UPPER(REPLACE(kode_tiket, '-', '')) = ?", [$normalizedKeyword])
+                  // Cocokkan ke plat nomor dengan menghapus spasi dari sisi SQL
                   ->orWhereHas('kendaraan', function ($kQuery) use ($normalizedKeyword) {
-                      $kQuery->whereRaw("UPPER(REPLACE(no_polisi, ' ', '')) = ?", [$normalizedKeyword]);
+                      $kQuery->whereRaw("UPPER(REPLACE(REPLACE(no_polisi, ' ', ''), '-', '')) = ?", [$normalizedKeyword]);
                   });
         })
+        ->latest('id')
         ->first();
 
         if (!$transaksi) {
             return response()->json([
                 'success' => false,
-                'message' => 'Tiket atau Plat Nomor tidak ditemukan / Kendaraan sudah keluar.'
+                'message' => 'Data tidak ditemukan. Pastikan tiket/plat benar dan kendaraan belum diproses keluar.'
             ], 404);
         }
 
@@ -449,32 +462,34 @@ class ParkirController extends Controller
     {
         $term = $request->get('term');
 
-        // Jika tidak ada inputan, kembalikan array kosong
         if (!$term) {
             return response()->json([]);
         }
 
-        // Normalisasi term: hilangkan spasi dan jadikan huruf besar
-        // agar pencarian lebih fleksibel (misal user ketik "D1234" tetap ketemu "D 1234 AB")
-        $normalizedTerm = strtoupper(preg_replace('/\s+/', '', $term));
+        // Normalisasi term pencarian (bersihkan spasi)
+        $normalizedTerm = strtoupper(preg_replace('/[^A-Z0-9]/', '', $term));
 
-        // Query ke TransaksiParkir yang masih berstatus 'parkir'
         $transaksiAktif = TransaksiParkir::with('kendaraan')
-            ->where('status_parkir', 'parkir')
-            ->whereHas('kendaraan', function ($query) use ($term, $normalizedTerm) {
-                $query->where('no_polisi', 'LIKE', '%' . $term . '%')
-                      ->orWhereRaw("UPPER(REPLACE(no_polisi, ' ', '')) LIKE ?", ['%' . $normalizedTerm . '%']);
+            ->where(function($q) {
+                $q->whereNull('waktu_keluar')
+                  ->orWhere('status_parkir', 'parkir');
             })
-            ->take(10) // Batasi hasil maksimal 10 agar dropdown tidak berat
+            ->where(function($query) use ($term, $normalizedTerm) {
+                $query->where('kode_tiket', 'LIKE', '%' . $term . '%')
+                      ->orWhereRaw("UPPER(REPLACE(kode_tiket, '-', '')) LIKE ?", ['%' . $normalizedTerm . '%'])
+                      ->orWhereHas('kendaraan', function ($kQuery) use ($term, $normalizedTerm) {
+                          $kQuery->where('no_polisi', 'LIKE', '%' . $term . '%')
+                                 ->orWhereRaw("UPPER(REPLACE(REPLACE(no_polisi, ' ', ''), '-', '')) LIKE ?", ['%' . $normalizedTerm . '%']);
+                      });
+            })
+            ->take(10)
             ->get();
 
         $results = [];
         foreach ($transaksiAktif as $transaksi) {
             if ($transaksi->kendaraan) {
                 $results[] = [
-                    // 'label' adalah teks yang akan muncul di daftar dropdown
                     'label' => $transaksi->kendaraan->no_polisi . ' (' . $transaksi->kode_tiket . ')',
-                    // 'value' adalah teks yang akan diisikan ke dalam input text saat item dipilih
                     'value' => $transaksi->kendaraan->no_polisi
                 ];
             }

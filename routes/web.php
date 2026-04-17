@@ -16,6 +16,9 @@ use App\Http\Controllers\{
 // --- PUBLIC ROUTES ---
 Route::redirect('/', '/login');
 
+Route::get('/parkir/cari/{keyword}', [ParkirController::class, 'cariDataKeluar'])
+    ->name('transaksi-parkirs.cari');
+    
 // --- AUTHENTICATED ROUTES ---
 Route::middleware(['auth', 'verified'])->group(function () {
 
