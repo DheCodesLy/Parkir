@@ -231,41 +231,43 @@
 
 <script>
 $(document).ready(function() {
+    // --- STATE & GLOBAL VARIABLES ---
     let html5QrCode = null;
+    let idTerpilih = null;
 
-    // --- FUNGSI FORMAT PINTAR ---
-    function formatInput(value) {
+    // --- 1. UTILITY FUNCTIONS ---
+    // Format Plat Nomor otomatis
+    const formatInput = (value) => {
         let val = String(value).toUpperCase();
+        if (val.startsWith('TKT')) return val.replace(/\s+/g, '');
 
-        // Jika diawali "TKT", biarkan dan hanya hilangkan spasi
-        if (val.startsWith('TKT')) {
-            return val.replace(/\s+/g, '');
-        }
-
-        // Format otomatis seperti Plat Nomor
         const raw = val.replace(/[^A-Z0-9]/g, '').slice(0, 9);
         let depan = '', angka = '', belakang = '';
-
         const matchDepan = raw.match(/^[A-Z]{1,2}/);
         if (matchDepan) depan = matchDepan[0];
-
         const sisa1 = raw.slice(depan.length);
         const matchAngka = sisa1.match(/^\d{1,4}/);
         if (matchAngka) angka = matchAngka[0];
-
         const sisa2 = sisa1.slice(angka.length);
         const matchBelakang = sisa2.match(/^[A-Z]{1,3}/);
         if (matchBelakang) belakang = matchBelakang[0];
 
         return [depan, angka, belakang].filter(Boolean).join(' ').trim();
-    }
+    };
 
-    // Terapkan format pintar saat ngetik
+    // UI Reset - Sembunyikan form jika pencarian gagal/baru
+    const resetUI = () => {
+        idTerpilih = null;
+        $("#formKeluar").slideUp(300);
+        $("#sidebar_data").hide();
+        $("#sidebar_placeholder").fadeIn(300);
+    };
+
+    // --- 2. EVENT HANDLERS (PENCARIAN) ---
     $('#keyword_pencarian').on('input', function() {
         $(this).val(formatInput($(this).val()));
     });
 
-    // Deteksi Enter untuk pencarian
     $('#keyword_pencarian').on('keypress', function (e) {
         if(e.which === 13){
             e.preventDefault();
@@ -273,52 +275,39 @@ $(document).ready(function() {
         }
     });
 
-    // --- AUTOCOMPLETE ---
     $("#keyword_pencarian").autocomplete({
         source: "{{ route('transaksi-parkirs.autocomplete.plat') }}",
         minLength: 2,
-        select: function(event, ui) {
-            fetchData(ui.item.value);
-        }
+        select: (event, ui) => fetchData(ui.item.value)
     });
 
-    // --- FUNGSI SCANNER ---
+    // --- 3. SCANNER LOGIC ---
+    const stopScanner = () => {
+        if (html5QrCode) {
+            html5QrCode.stop().then(() => $("#scannerBox").slideUp(300)).catch(() => $("#scannerBox").slideUp(300));
+        } else {
+            $("#scannerBox").slideUp(300);
+        }
+    };
+
     $("#btnToggleScanner").on("click", function() {
         let scannerBox = $("#scannerBox");
-
         if (scannerBox.is(":hidden")) {
             scannerBox.slideDown(300);
-            if (!html5QrCode) {
-                html5QrCode = new Html5Qrcode("qr-reader");
-            }
-            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-
-            html5QrCode.start({ facingMode: "environment" }, config, (decodedText) => {
-                if (navigator.vibrate) navigator.vibrate(200);
-
-                let finalKeyword = decodedText;
-
-                // Coba Parsing JSON (Karena QR dari Form Masuk berupa JSON)
-                try {
-                    let parsedData = JSON.parse(decodedText);
-                    if (parsedData.kode_tiket) {
-                        finalKeyword = parsedData.kode_tiket;
-                    }
-                } catch (e) {
-                    // Bukan JSON, biarkan teks murni
+            if (!html5QrCode) html5QrCode = new Html5Qrcode("qr-reader");
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 },
+                (decodedText) => {
+                    let finalKeyword = decodedText;
+                    try {
+                        let parsed = JSON.parse(decodedText);
+                        finalKeyword = parsed.kode_tiket || decodedText;
+                    } catch (e) {}
+                    $("#keyword_pencarian").val(finalKeyword.toUpperCase());
+                    stopScanner();
+                    fetchData(finalKeyword);
                 }
-
-                $("#keyword_pencarian").val(finalKeyword.toUpperCase());
-                stopScanner();
-                fetchData(finalKeyword);
-
-            }).catch(err => {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Gagal',
-                    text: 'Kamera gagal diakses. Pastikan izin diberikan.',
-                    confirmButtonColor: '#2563eb'
-                });
+            ).catch(() => {
+                Swal.fire('Error', 'Kamera tidak bisa diakses', 'error');
                 scannerBox.slideUp(300);
             });
         } else {
@@ -326,99 +315,90 @@ $(document).ready(function() {
         }
     });
 
-    function stopScanner() {
-        if (html5QrCode) {
-            html5QrCode.stop().then(() => {
-                $("#scannerBox").slideUp(300);
-            }).catch(err => {
-                $("#scannerBox").slideUp(300);
-            });
-        } else {
-            $("#scannerBox").slideUp(300);
-        }
-    }
-    $("#btnCloseScanner").click(function() { stopScanner(); });
+    $("#btnCloseScanner").click(stopScanner);
 
-    // --- FETCH DATA AJAX ---
+    // --- 4. AJAX: CARI DATA ---
     function fetchData(keyword) {
         if(!keyword.trim()) return;
 
         Swal.fire({
-            title: 'Memeriksa Sistem...',
+            title: 'Mencari data...',
             allowOutsideClick: false,
-            didOpen: () => { Swal.showLoading() }
+            didOpen: () => Swal.showLoading()
         });
 
-        // MENGGUNAKAN FUNGSI URL() LARAVEL AGAR TIDAK ERROR SAAT DI-DEPLOY/SUBFOLDER
         $.ajax({
-            url: "{{ url('/parkir/cari') }}/" + encodeURIComponent(keyword),
+            url: `{{ url('/parkir/cari') }}/${encodeURIComponent(keyword)}`,
             method: "GET",
             success: function(res) {
                 Swal.close();
                 if(res.success) {
+                    idTerpilih = res.data.id;
+                    // Update Informasi di UI
                     $("#txt_plat").text(res.data.nomor_plat || '-');
                     $("#txt_jenis").text(res.data.jenis_kendaraan || '-');
                     $("#txt_tiket").text(res.data.kode_tiket || '-');
                     $("#txt_pemilik").html(`<i class="ri-user-line text-blue-500"></i> ${res.data.nama_pemilik || 'Umum / Tamu'}`);
 
-                    // Format waktu jika ada
-                    let waktuMsk = res.data.waktu_masuk ? new Date(res.data.waktu_masuk).toLocaleString('id-ID', {day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : '-';
-                    $("#txt_masuk").text(waktuMsk);
+                    let msk = res.data.waktu_masuk ? new Date(res.data.waktu_masuk).toLocaleString('id-ID') : '-';
+                    $("#txt_masuk").text(msk);
 
                     $("#sidebar_placeholder").hide();
                     $("#sidebar_data").fadeIn(400);
-
-                    // UPDATE ACTION FORM DINAMIS DENGAN URL()
-                    $("#mainForm").attr("action", "{{ url('/parkir/keluar') }}/" + res.data.id);
                     $("#formKeluar").slideDown(400);
                 }
             },
             error: function(xhr) {
-                // ERROR HANDLING YANG LEBIH AKURAT
-                let pesanError = "Tiket/Plat salah atau kendaraan sudah keluar.";
-                let judulError = "Data Tidak Ditemukan";
-
-                if (xhr.responseJSON && xhr.responseJSON.message) {
-                    pesanError = xhr.responseJSON.message;
-                } else if (xhr.status === 404) {
-                    judulError = "Route Tidak Ditemukan (404)";
-                    pesanError = "Terjadi kesalahan pada penulisan rute/URL AJAX. Cek web.php";
-                } else if (xhr.status === 500) {
-                    judulError = "Error Server (500)";
-                    pesanError = "Terdapat kesalahan sintaks di Controller Laravel. Silakan cek file log.";
-                }
-
-                Swal.fire({
-                    icon: "error",
-                    title: judulError,
-                    text: pesanError,
-                    confirmButtonColor: '#ef4444'
-                });
-
-                $("#formKeluar").slideUp(300);
-                $("#sidebar_data").hide();
-                $("#sidebar_placeholder").fadeIn(300);
+                resetUI();
+                let msg = xhr.responseJSON?.message || "Data tidak ditemukan atau sudah keluar.";
+                Swal.fire('Gagal', msg, 'error');
             }
         });
     }
 
-    // --- TOGGLE ANIMASI FORM DENDA ---
-    $("#tiket_hilang").change(function() {
-        if(this.checked) {
-            $("#input_denda_tiket").slideDown(250);
-            $("#input_denda_tiket input").focus();
-        } else {
-            $("#input_denda_tiket").slideUp(250);
+    // --- 5. AJAX: SIMPAN DATA (SUBMIT) ---
+    $("#mainForm").on("submit", function(e) {
+        e.preventDefault();
+
+        if (!idTerpilih) {
+            Swal.fire('Peringatan', 'Cari data kendaraan terlebih dahulu!', 'warning');
+            return;
         }
+
+        Swal.fire({
+            title: 'Konfirmasi',
+            text: "Selesaikan transaksi parkir ini?",
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Ya, Selesai',
+            cancelButtonText: 'Batal'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                Swal.fire({ title: 'Memproses...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+                $.ajax({
+                    url: `{{ url('/transaksi-parkirs/keluar') }}/${idTerpilih}`,
+                    method: "POST",
+                    data: $(this).serialize(),
+                    success: function(response) {
+                        Swal.fire('Berhasil!', response.message, 'success').then(() => location.reload());
+                    },
+                    error: function(xhr) {
+                        let msg = xhr.responseJSON?.message || "Terjadi kesalahan sistem.";
+                        Swal.fire('Gagal', msg, 'error');
+                    }
+                });
+            }
+        });
+    });
+
+    // --- 6. UI INTERACTION ---
+    $("#tiket_hilang").change(function() {
+        this.checked ? $("#input_denda_tiket").slideDown(250) : $("#input_denda_tiket").slideUp(250);
     });
 
     $("#pakai_denda_manual").change(function() {
-        if(this.checked) {
-            $("#box_denda_manual").slideDown(250);
-            $("#box_denda_manual input:first").focus();
-        } else {
-            $("#box_denda_manual").slideUp(250);
-        }
+        this.checked ? $("#box_denda_manual").slideDown(250) : $("#box_denda_manual").slideUp(250);
     });
 });
 </script>

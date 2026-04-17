@@ -18,7 +18,7 @@ Route::redirect('/', '/login');
 
 Route::get('/parkir/cari/{keyword}', [ParkirController::class, 'cariDataKeluar'])
     ->name('transaksi-parkirs.cari');
-    
+
 // --- AUTHENTICATED ROUTES ---
 Route::middleware(['auth', 'verified'])->group(function () {
 
@@ -36,7 +36,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::post('/masuk', 'masuk')->name('akses-masuk');
         Route::post('/pilih-lahan', 'pilihLahan')->name('pilih-lahan');
-        Route::post('/{id}/keluar', 'keluar')->name('keluar');
+        Route::post('/keluar/{id}', 'keluar')->name('keluar');
     });
 
     // 3. MASTER DATA: LAHAN PARKIR

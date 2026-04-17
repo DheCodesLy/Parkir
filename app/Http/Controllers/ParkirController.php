@@ -504,8 +504,8 @@ class ParkirController extends Controller
             'tiket_hilang' => ['nullable', 'boolean'],
             'nominal_denda_tiket_hilang' => ['nullable', 'numeric', 'min:0'],
             'denda_manual' => ['nullable', 'array'],
-            'denda_manual.*.alasan' => ['required_with:denda_manual', 'string', 'max:255'],
-            'denda_manual.*.nominal' => ['required_with:denda_manual', 'numeric', 'min:0'],
+            'denda_manual.*.alasan' => ['nullable', 'string', 'max:255'],
+            'denda_manual.*.nominal' => ['nullable', 'numeric', 'min:0'],
             'keterangan' => ['nullable', 'string'],
             'kondisi_kendaraan' => ['nullable', 'in:baik,rusak,hilang'],
         ]);
@@ -540,14 +540,17 @@ class ParkirController extends Controller
             }
 
             foreach ($dendaManualItems as $item) {
-                $nominal = (float) $item['nominal'];
-                $totalDendaManual += $nominal;
+                $nominal = (float) ($item['nominal'] ?? 0);
+                $alasan = $item['alasan'] ?? '-';
 
-                $alasanDenda[] = [
-                    'jenis' => 'manual',
-                    'alasan' => $item['alasan'],
-                    'nominal' => $nominal,
-                ];
+                if ($nominal > 0 || !empty($item['alasan'])) {
+                    $totalDendaManual += $nominal;
+                    $alasanDenda[] = [
+                        'jenis' => 'manual',
+                        'alasan' => $alasan,
+                        'nominal' => $nominal,
+                    ];
+                }
             }
 
             $statusTiket = $tiketHilang ? 'hilang' : 'nonaktif';
@@ -596,9 +599,7 @@ class ParkirController extends Controller
         if (!$alasanDenda) {
             return [];
         }
-
         $decoded = json_decode($alasanDenda, true);
-
         return is_array($decoded) ? $decoded : [];
     }
 }
